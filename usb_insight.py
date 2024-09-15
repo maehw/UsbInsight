@@ -76,8 +76,11 @@ class UsbPacket:
 
 
 class UsbSofPacket(UsbPacket):
-    def __init__(self, start_time_us, frame_number):
+    def __init__(self, start_time_us):
         super().__init__(start_time_us, 'SOF')
+        self.frame_number = None
+
+    def set_frame_number(self, frame_number):
         self.frame_number = frame_number
 
     def __repr__(self):
@@ -259,8 +262,14 @@ def get_data_byte(field):
 
 
 def is_frame_no(field):
-    breakpoint()
-    assert False  # FIXME: haven't ever seen SOF packets in my traces, so needs more investigation here
+    return field.startswith('Frame # 0x')
+
+
+def get_frame_number(field):
+    if not is_frame_no(field):
+        return None
+    else:
+        return int(field[10:], 16)
 
 
 def is_in_packet(packet):
@@ -372,12 +381,14 @@ def decode_usb(command_line_args):
     export_transactions = command_line_args.transactions or command_line_args.all_transactions
     export_all_transactions = command_line_args.all_transactions
     decimal_not_hex = command_line_args.decimal
+    progress_bar = command_line_args.progress_bar
 
     if verbosity > 0:
         print(f"Verbosity: {verbosity}")
         print(f"Exporting packets: {export_packets}")
         print(f"Exporting transactions: {export_transactions}")
         print(f"Exporting all transactions: {export_all_transactions}")
+        print(f"Display progress bar: {progress_bar}")
         if decimal_not_hex:
             print("Using decimal", end="")
         else:
@@ -394,6 +405,12 @@ def decode_usb(command_line_args):
     packet = None
     transaction = None
     last_sync_us = None  # last SYNC start in microseconds
+
+    # introduce a progress bar which is output to stderr
+    pbar = None
+    if progress_bar:
+        from tqdm import tqdm
+        pbar = tqdm(desc='Processed CSV lines', unit='line', unit_scale=True, total=len(df.index))
 
     for index, row in df.iterrows():
         # check assumptions for every row and "field"
@@ -430,6 +447,10 @@ def decode_usb(command_line_args):
             packet.append(d)
         elif state == 'HANDSHAKE_PID':
             packet = UsbHandshakePacket(last_sync_us, get_pid(field))
+        elif state == 'SOF_PID':
+            packet = UsbSofPacket(last_sync_us)
+        elif state == 'SOF_FRAME_NO':
+            packet.set_frame_number(get_frame_number(field))
 
         # Packet complete, auto-run virtual states to IDLE
         if '_CPLT' in state:
@@ -474,6 +495,9 @@ def decode_usb(command_line_args):
             # if verbosity > 0:  # note: could output USB packet state after having run packet fsm
             #    print(f"--> {state}")
             assert state == 'IDLE', 'Expected auto transition to IDLE'
+
+        if pbar:
+            pbar.update(1)
 
     if verbosity > 0:
         print("Decoding finished.")
@@ -533,6 +557,10 @@ if __name__ == '__main__':
                         action='store_true',
                         help='represent payload data as decimal values instead of hexadecimal in exported CSV file '
                              '(does not affect verbose output)')
+    parser.add_argument('-pbar',
+                        '--progress-bar',
+                        action='store_true',
+                        help='show a progress bar on stderr')
     parser.add_argument('-v',
                         '--verbose',
                         action='count',

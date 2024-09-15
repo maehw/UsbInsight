@@ -1,6 +1,6 @@
 # UsbInsight - a high-level USB decoder
 
-This repository provides a tool called **UsbInsight** - a _decoder_ - which parses CSV tables exported from USB HS/LS traffic recorded with the Saleae Logic software. Unfortunately, currently there's no support to directly write a USB [High-Level Analyzer (HLA)](https://support.saleae.com/extensions/high-level-analyzer-extensions) extension for Saleae Logic.
+This repository provides a tool called **UsbInsight** - a _decoder_ - which parses CSV tables exported from USB HS/LS (i.e. high- or low-speed) traffic recorded with the [Saleae Logic 2 software](https://www.saleae.com/pages/downloads). Unfortunately, currently there's no support to directly write a USB [High-Level Analyzer (HLA)](https://support.saleae.com/extensions/high-level-analyzer-extensions) extension for Saleae Logic.
 
 With the help of this tool, we can now work with USB traffic on _**USB packet** level_ and even _**USB transaction** level_ instead of having to deal with many, many _**USB packet fields**_ (e.g. SYNC, PID, CRC, EOP) as `v1frame`s. Great that Salea does all the **USB signal decoding** and already provides the **USB packet fields** - **but** getting all this data gets especially tedious when there are a lot of "irrelevant" _Reset_ and _Keep alive_ signals for USB low-speed or _start of frame (SOF) packets_ for USB full-speed.
 
@@ -35,8 +35,10 @@ The exported CSV file will have five columns labelled "name", "type", "start_tim
 
 ## Running the decoder
 
+Run `python3 usb_insight.py --help` to see the usage:
+
 ```
-usage: usb_insight.py [-h] [-p] [-t] [-ta] [-d] [-v]
+usage: usb_insight.py [-h] [-p] [-t] [-ta] [-d] [-pbar] [-v]
                       input_filename output_filename
 
 USB Protocol Decoder
@@ -56,6 +58,8 @@ optional arguments:
   -d, --decimal         represent payload data as decimal values instead of
                         hexadecimal in exported CSV file (does not affect
                         verbose output)
+  -pbar, --progress-bar
+                        show a progress bar on stderr
   -v, --verbose         output more or less details on stdout, will slow
                         things down; can add multiple, e.g. -vvv
 ```
@@ -92,6 +96,7 @@ The output CSV file:
   * `pandas`: used for processing CSV files
   * `argparse`: used for parsing command line parameter
   * `os`: used to determine OS-specific line separators
+  * `tqdm`: used for displaying a progress bar on stderr (only required when using command line option `-pbar`)
 
 ## Internals
 
@@ -107,13 +112,12 @@ It's basically just two nested finite state machines:
 
 - Time stamps are rounded to microseconds (nanosecond granularity was not relevant for my use case) - could use ns instead of us, when needed;
   could also use duration instead of the end time
-- Could add a progress bar that shows how much of the input file has already been processed and maybe also an estimated time of completion. - So that you know if it's worth getting another coffee or not.
-- Maybe a processing speed indicator that show a factor in relation to how much faster/slower than real-time processing we are.
+- Maybe a variant of the progress bar where the bar is rather a processing speed indicator that show a factor in relation to how much faster/slower than real-time processing we are.
 - There could be more additional filtering capabilities (e.g. only export traffic with specific device addresses or even endpoints). For now, this has to be done in your own post-processing.
 - Cannot handle `NYET` handshake packets yet.
 - Cannot handle special PIDs `PREamble`, `ERR`, `Split` and `Ping` yet.
 - This is all text-based processing and hence quite slow! But it works.
-- This has only been tested with my USB low-speed captures so far (i.e. also no SOF packets seen there). Feel free to provide full-speed captures and also fix the code.
+- This has only been tested with some of my own USB low-speed and full-speed captures so far. Feel free to provide your own captures, open an issue on GitHub and of course, also to fix the code and contribute your changes (by opening a pull request).
 - When analyzing the actual payload data, hexadecimal may be a better data representation than the current decimal one.
 - Separator for CSV output files is `;` as opposed to `,` in the input files from the Saleae Logic export. This allows us to export a list of payload bytes separated with commas in a single column.
 
