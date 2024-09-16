@@ -38,7 +38,7 @@ The exported CSV file will have five columns labelled "name", "type", "start_tim
 Run `python3 usb_insight.py --help` to see the usage:
 
 ```
-usage: usb_insight.py [-h] [-p] [-t] [-ta] [-d] [-pbar] [-v]
+usage: usb_insight.py [-h] [-p] [-t] [-ta] [-d] [-c] [-pbar] [-v]
                       input_filename output_filename
 
 USB Protocol Decoder
@@ -58,10 +58,22 @@ optional arguments:
   -d, --decimal         represent payload data as decimal values instead of
                         hexadecimal in exported CSV file (does not affect
                         verbose output)
+  -c, --ascii-characters
+                        represent payload data as ASCII printable characters
+                        in exported CSV file where feasible (does not affect
+                        verbose output)
   -pbar, --progress-bar
                         show a progress bar on stderr
   -v, --verbose         output more or less details on stdout, will slow
                         things down; can add multiple, e.g. -vvv
+```
+
+### Progress bar
+
+The optional `-pbar` (`--progress-bar`) command line option prints the current processing progress, speed and estimated remaining time on stdout, e.g.:
+
+```
+Processed CSV lines:  78%|███████▊  | 1.74M/2.24M [10:30<06:15, 1.34kline/s]
 ```
 
 ### Exporting USB packets

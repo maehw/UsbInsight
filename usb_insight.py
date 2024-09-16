@@ -56,13 +56,17 @@ class UsbPacket:
     def __repr__(self):
         return f"UsbPacket(PID: {self.pid})"
 
-    def data_repr(self, show_decimal=False):
+    def data_repr(self, show_decimal=False, ascii_characters=False):
+        if ascii_characters:
+            c = get_ascii_repr(self.data, show_decimal)
+            if c is not None:
+                return c
         if show_decimal:
             return f"{self.data}"
         else:
             return declist2hexstr(self.data)
 
-    def to_csv(self, show_decimal=False):
+    def to_csv(self, show_decimal=False, ascii_characters=False):
         addr = ''
         if self.addr is not None:  # zeroes are also falsy
             addr = self.addr
@@ -71,7 +75,7 @@ class UsbPacket:
             ep = self.ep
         data = ''
         if self.data == [] or self.data:  # also show empty lists, only hide None
-            data = self.data_repr(show_decimal)
+            data = self.data_repr(show_decimal, ascii_characters)
         return f"{self.start_time_us};{self.end_time_us};{self.pid};{addr};{ep};{data}"
 
 
@@ -138,7 +142,7 @@ class UsbTransaction:
         self.success = success
         self.end_time_us = end_time_us
 
-    def data_repr(self, show_decimal=False):
+    def data_repr(self, show_decimal=False, ascii_characters=False):
         if self.type == 'SETUP':
             if not self.data:
                 return "?"
@@ -151,6 +155,10 @@ class UsbTransaction:
                     f"wIndex={self.data[4:6]}, "
                     f"wLength={self.data[6:]}")
         else:
+            if ascii_characters:
+                c = get_ascii_repr(self.data)
+                if c is not None:
+                    return c
             if show_decimal:
                 return f"{self.data}"
             else:
@@ -170,11 +178,31 @@ class UsbTransaction:
                 f"Success: {self.success}, "
                 f"Data: {self.data_repr()})")
 
-    def to_csv(self, show_success_column=False, show_decimal=False):
+    def to_csv(self, show_success_column=False, show_decimal=False, ascii_characters=False):
         s = ''
         if show_success_column:
             s = f";{self.success}"
-        return f"{self.start_time_us};{self.end_time_us};{self.type};{self.addr};{self.ep};{self.data_repr(show_decimal)}{s}"
+        return f"{self.start_time_us};{self.end_time_us};{self.type};{self.addr};{self.ep};{self.data_repr(show_decimal, ascii_characters)}{s}"
+
+
+def get_ascii_repr(value, show_decimal=False):
+    if isinstance(value, list):
+        return [get_ascii_repr(v) for v in value]
+    else:
+        # check if the value is a valid ASCII code
+        if 0 <= value <= 127:
+            char = chr(value)
+            # check if the character is printable but also
+            # NOT a specific whitespace (tab, line break, carriage return)
+            # and also not a comma, nor a semicolon, nor single tick or double quotes
+            # to prevent breaking the CSV file
+            if char.isprintable() and (value not in [9, 10, 13, 34, 39, 44, 59]):
+                return char
+        if show_decimal:
+            return value
+        else:
+            # treat first part as a raw string for proper handling of the backslash
+            return r"\x" + f"{value:02X}"  # FIXME: still printed as two backslashes; how to properly (not?) escape
 
 
 def get_request_name(request_id):
@@ -381,6 +409,7 @@ def decode_usb(command_line_args):
     export_transactions = command_line_args.transactions or command_line_args.all_transactions
     export_all_transactions = command_line_args.all_transactions
     decimal_not_hex = command_line_args.decimal
+    ascii_characters = command_line_args.ascii_characters
     progress_bar = command_line_args.progress_bar
 
     if verbosity > 0:
@@ -393,6 +422,7 @@ def decode_usb(command_line_args):
             print("Using decimal", end="")
         else:
             print("Using hexadecimal", end="")
+        print(f"Using printable ASCII characters: {ascii_characters}")
         print(" payload data representation in CSV output file")
         print("Decoding started.")
 
@@ -517,7 +547,7 @@ def decode_usb(command_line_args):
             f.write(heading + os.linesep)
 
             for p in packets:
-                csv_line = p.to_csv(decimal_not_hex)
+                csv_line = p.to_csv(decimal_not_hex, ascii_characters)
                 f.write(csv_line + os.linesep)
 
         if export_transactions:
@@ -531,10 +561,10 @@ def decode_usb(command_line_args):
 
             for t in transactions:
                 if t.success:
-                    csv_line = t.to_csv(export_all_transactions, decimal_not_hex)
+                    csv_line = t.to_csv(export_all_transactions, decimal_not_hex, ascii_characters)
                     f.write(csv_line + os.linesep)
                 elif (not t.success) and export_all_transactions:
-                    csv_line = t.to_csv(export_all_transactions, decimal_not_hex)
+                    csv_line = t.to_csv(export_all_transactions, decimal_not_hex, ascii_characters)
                     f.write(csv_line + os.linesep)
 
 
@@ -556,6 +586,11 @@ if __name__ == '__main__':
                         '--decimal',
                         action='store_true',
                         help='represent payload data as decimal values instead of hexadecimal in exported CSV file '
+                             '(does not affect verbose output)')
+    parser.add_argument('-c',
+                        '--ascii-characters',
+                        action='store_true',
+                        help='represent payload data as ASCII printable characters in exported CSV file where feasible '
                              '(does not affect verbose output)')
     parser.add_argument('-pbar',
                         '--progress-bar',
@@ -580,6 +615,6 @@ if __name__ == '__main__':
         parser.error('Need to provide either -p or -t or -ta')
     elif args.packets and (args.transactions or args.all_transactions):
         parser.print_help()
-        parser.error('Cannot mix -p with -t/-ta')
+        parser.error('Cannot mix -p/--packets with -t/--transactions or -ta/--all-transactions')
     else:
         decode_usb(args)
