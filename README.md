@@ -1,6 +1,6 @@
 # UsbInsight - a high-level USB decoder
 
-This repository provides a tool called **UsbInsight** - a _decoder_ - which parses CSV tables exported from USB HS/LS (i.e. high- or low-speed) traffic recorded with the [Saleae Logic 2 software](https://www.saleae.com/pages/downloads). Unfortunately, currently there's no support to directly write a USB [High-Level Analyzer (HLA)](https://support.saleae.com/extensions/high-level-analyzer-extensions) extension for Saleae Logic.
+This repository provides a tool called **UsbInsight** - a _decoder_ - which parses CSV tables exported from USB LS/LS (i.e. low- or full-speed) traffic recorded with the [Saleae Logic 2 software](https://www.saleae.com/pages/downloads). Unfortunately, currently there's no support to directly write a USB [High-Level Analyzer (HLA)](https://support.saleae.com/extensions/high-level-analyzer-extensions) extension for Saleae Logic.
 
 With the help of this tool, we can now work with USB traffic on _**USB packet** level_ and even _**USB transaction** level_ instead of having to deal with many, many _**USB packet fields**_ (e.g. SYNC, PID, CRC, EOP) as `v1frame`s. Great that Salea does all the **USB signal decoding** and already provides the **USB packet fields** - **but** getting all this data gets especially tedious when there are a lot of "irrelevant" _Reset_ and _Keep alive_ signals for USB low-speed or _start of frame (SOF) packets_ for USB full-speed.
 
@@ -75,6 +75,10 @@ python usb_insight.py -p ./test/sound.csv ./test/sound_packets.csv
 The output CSV file:
 
 ![CSV output file with USB packets](./doc/CsvOutputPackets.png)
+
+Side note: strictly speaking this is not a CSV file as the CSV stands for "comma-separated values". Instead, we're using semicolons here, and you may have to tell this to your CSV viewer that a different separator is used to display the data properly:
+
+![CSV output file view: separator selection](./doc/CsvViewSeparatorSelection.png)
 
 ### Exporting USB transactions
 
