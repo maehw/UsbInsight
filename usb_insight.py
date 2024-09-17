@@ -152,10 +152,10 @@ class UsbTransaction:
                 request = self.data[1]
                 return (
                     f"bmRequestType={get_request_type_descr(request_type)}, "
-                    f"bRequest={get_standard_request_name(self.data[1], request_type)}, "
-                    f"wValue={self.data[2:4]}, "
-                    f"wIndex={self.data[4:6]}, "
-                    f"wLength={self.data[6:]}")
+                    f"bRequest={get_standard_request_name(request, request_type)}, "
+                    f"wValue=0x{list_to_uint16(self.data[2:4]):04X}, "
+                    f"wIndex=0x{list_to_uint16(self.data[4:6]):04X}, "
+                    f"wLength=0x{list_to_uint16(self.data[6:]):04X}")
         else:
             if ascii_characters:
                 c = get_ascii_repr(self.data)
@@ -184,7 +184,13 @@ class UsbTransaction:
         s = ''
         if show_success_column:
             s = f";{self.success}"
-        return f"{self.start_time_us};{self.end_time_us};{self.type};{self.addr};{self.ep};{self.data_repr(show_decimal, ascii_characters)}{s}"
+        return (f"{self.start_time_us};{self.end_time_us};{self.type};{self.addr};{self.ep};"
+                f"{self.data_repr(show_decimal, ascii_characters)}{s}")
+
+
+def list_to_uint16(data):
+    assert len(data) == 2
+    return int.from_bytes(data, byteorder='little')
 
 
 def get_ascii_repr(value, show_decimal=False):
@@ -208,7 +214,7 @@ def get_ascii_repr(value, show_decimal=False):
 
 
 def get_request_type_descr(request_type):
-    descr = r"{" + f"0x{request_type:02X}: dir="
+    descr = f"0x{request_type:02X}=" + r"{dir="
 
     if request_type & (1 << 7):
         descr += "host<-dev"
@@ -238,62 +244,63 @@ def get_standard_request_name(request_id, request_type):
     # standard requests according to https://www.usbmadesimple.co.uk/ums_4.htm +
     # https://www.beyondlogic.org/usbnutshell/usb6.shtml;
     # in numerical, ascending order of the request ID
+    name = f"0x{request_id:02X}"  # always start with hex representation
     if request_id == 0x00:
         # data phase transfer direction: always device to host
         # recipient: device, interface or endpoint
         if request_type in [0x80, 0x81, 0x82]:
-            return 'GET_STATUS'
+            name += '=GET_STATUS'
     elif request_id == 0x01:
         # data phase transfer direction: always host to device
         # recipient: device, interface or endpoint
         if request_type in [0x00, 0x01, 0x02]:
-            return 'CLEAR_FEATURE'
+            name += '=CLEAR_FEATURE'
     elif request_id == 0x03:
         # data phase transfer direction: always host to device
         # recipient: device, interface or endpoint
         if request_type in [0x00, 0x01, 0x02]:
-            return 'SET_FEATURE'
+            name += '=SET_FEATURE'
     elif request_id == 0x05:
         # data phase transfer direction: host to device
         # recipient: device
         if request_type == 0x00:
-            return 'SET_ADDRESS'
+            name += '=SET_ADDRESS'
     elif request_id == 0x06:
         # data phase transfer direction: device to host
         # recipient: device
         if request_type == 0x80:
-            return 'GET_DESCRIPTOR'
+            name += '=GET_DESCRIPTOR'
     elif request_id == 0x07:
         # data phase transfer direction: host to device
         # recipient: device
         if request_type == 0x00:
-            return 'SET_DESCRIPTOR'
+            name += '=SET_DESCRIPTOR'
     elif request_id == 0x08:
         # data phase transfer direction: device to host
         # recipient: device
         if request_type == 0x80:
-            return 'GET_CONFIGURATION'
+            name += '=GET_CONFIGURATION'
     elif request_id == 0x09:
         # data phase transfer direction: host to device
         # recipient: device
         if request_type == 0x00:
-            return 'SET_CONFIGURATION'
+            name += '=SET_CONFIGURATION'
     elif request_id == 0x0A:
         # data phase transfer direction: device to host
         # recipient: interface
         if request_type == 0x81:
-            return 'GET_INTERFACE'
+            name += '=GET_INTERFACE'
     elif request_id == 0x11:
         # data phase transfer direction: host to device
         # recipient: interface
         if request_type == 0x01:
-            return 'SET_INTERFACE'
+            name += '=SET_INTERFACE'
     elif request_id == 0x12:
         # data phase transfer direction: device to host
         # recipient: endpoint
         if request_type == 0x82:
-            return 'SYNCH_FRAME'
-    return f"0x{request_id:02X}"
+            name += '=SYNCH_FRAME'
+    return name
 
 
 # Conditions
@@ -389,7 +396,7 @@ def is_nak_packet(packet):
 
 
 def declist2hexstr(l):
-    assert type(l) == list
+    assert isinstance(l, list)
     return '[' + ', '.join(["0x{:02X}".format(e) for e in l]) + ']'
 
 
@@ -650,7 +657,7 @@ if __name__ == '__main__':
                         '--decimal',
                         action='store_true',
                         help='represent payload data as decimal values instead of hexadecimal in exported CSV file '
-                             '(does not affect verbose output)')
+                             '(does not affect verbose output and fields of SETUP packet)')
     parser.add_argument('-c',
                         '--ascii-characters',
                         action='store_true',
@@ -663,7 +670,8 @@ if __name__ == '__main__':
     parser.add_argument('-v',
                         '--verbose',
                         action='count',
-                        help='output more or less details on stdout, will slow things down; can add multiple, e.g. -vvv',
+                        help='output more or less details on stdout, will slow things down; can add multiple, '
+                             'e.g. -vvv',
                         default=0)
     parser.add_argument('input_filename',
                         type=str,

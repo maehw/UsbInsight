@@ -57,7 +57,7 @@ optional arguments:
                         acknowledged ones
   -d, --decimal         represent payload data as decimal values instead of
                         hexadecimal in exported CSV file (does not affect
-                        verbose output)
+                        verbose output and fields of SETUP packet)
   -c, --ascii-characters
                         represent payload data as ASCII printable characters
                         in exported CSV file where feasible (does not affect
