@@ -148,9 +148,11 @@ class UsbTransaction:
                 return "?"
             else:
                 assert len(self.data) == 8, 'Setup packet expected to be 8 bytes long'
+                request_type = self.data[0]
+                request = self.data[1]
                 return (
-                    f"bmRequestType=0x{self.data[0]:02X}, "
-                    f"bRequest={get_request_name(self.data[1])}, "
+                    f"bmRequestType={get_request_type_descr(request_type)}, "
+                    f"bRequest={get_standard_request_name(self.data[1], request_type)}, "
                     f"wValue={self.data[2:4]}, "
                     f"wIndex={self.data[4:6]}, "
                     f"wLength={self.data[6:]}")
@@ -205,31 +207,93 @@ def get_ascii_repr(value, show_decimal=False):
             return r"\x" + f"{value:02X}"  # FIXME: still printed as two backslashes; how to properly (not?) escape
 
 
-def get_request_name(request_id):
-    if request_id == 0x00:
-        return 'GET_STATUS'
-    elif request_id == 0x01:
-        return 'CLEAR_FEATURE'
-    elif request_id == 0x03:
-        return 'SET_FEATURE'
-    elif request_id == 0x05:
-        return 'SET_ADDRESS'
-    elif request_id == 0x06:
-        return 'GET_DESCRIPTOR'
-    elif request_id == 0x07:
-        return 'SET_DESCRIPTOR'
-    elif request_id == 0x08:
-        return 'GET_CONFIGURATION'
-    elif request_id == 0x09:
-        return 'SET_CONFIGURATION'
-    elif request_id == 0x0A:
-        return 'GET_INTERFACE'
-    elif request_id == 0x11:
-        return 'SET_INTERFACE'
-    elif request_id == 0x12:
-        return 'SYNCH_FRAME'
+def get_request_type_descr(request_type):
+    descr = r"{" + f"0x{request_type:02X}: dir="
+
+    if request_type & (1 << 7):
+        descr += "host<-dev"
     else:
-        return f"0x{request_id:02X}"
+        descr += "host->dev"
+
+    descr += ", type="
+    tp = (request_type >> 5) & 0x3
+    tp_descr = {0: 'standard', 1: 'class', 2: 'vendor', 3: 'reserved'}
+    descr += tp_descr[tp]
+
+    descr += ", rcpt="
+    rcpt = request_type & 0x1F
+    rcpt_descr = {0: 'device', 1: 'interface', 2: 'endpoint', 3: 'other'}
+    if rcpt in rcpt_descr:
+        descr += rcpt_descr[rcpt]
+    else:
+        descr += "reserved"
+
+    descr += r"}"
+    return descr
+
+
+def get_standard_request_name(request_id, request_type):
+    # get name of the standard request if it is one; otherwise return the hex value
+    #
+    # standard requests according to https://www.usbmadesimple.co.uk/ums_4.htm +
+    # https://www.beyondlogic.org/usbnutshell/usb6.shtml;
+    # in numerical, ascending order of the request ID
+    if request_id == 0x00:
+        # data phase transfer direction: always device to host
+        # recipient: device, interface or endpoint
+        if request_type in [0x80, 0x81, 0x82]:
+            return 'GET_STATUS'
+    elif request_id == 0x01:
+        # data phase transfer direction: always host to device
+        # recipient: device, interface or endpoint
+        if request_type in [0x00, 0x01, 0x02]:
+            return 'CLEAR_FEATURE'
+    elif request_id == 0x03:
+        # data phase transfer direction: always host to device
+        # recipient: device, interface or endpoint
+        if request_type in [0x00, 0x01, 0x02]:
+            return 'SET_FEATURE'
+    elif request_id == 0x05:
+        # data phase transfer direction: host to device
+        # recipient: device
+        if request_type == 0x00:
+            return 'SET_ADDRESS'
+    elif request_id == 0x06:
+        # data phase transfer direction: device to host
+        # recipient: device
+        if request_type == 0x80:
+            return 'GET_DESCRIPTOR'
+    elif request_id == 0x07:
+        # data phase transfer direction: host to device
+        # recipient: device
+        if request_type == 0x00:
+            return 'SET_DESCRIPTOR'
+    elif request_id == 0x08:
+        # data phase transfer direction: device to host
+        # recipient: device
+        if request_type == 0x80:
+            return 'GET_CONFIGURATION'
+    elif request_id == 0x09:
+        # data phase transfer direction: host to device
+        # recipient: device
+        if request_type == 0x00:
+            return 'SET_CONFIGURATION'
+    elif request_id == 0x0A:
+        # data phase transfer direction: device to host
+        # recipient: interface
+        if request_type == 0x81:
+            return 'GET_INTERFACE'
+    elif request_id == 0x11:
+        # data phase transfer direction: host to device
+        # recipient: interface
+        if request_type == 0x01:
+            return 'SET_INTERFACE'
+    elif request_id == 0x12:
+        # data phase transfer direction: device to host
+        # recipient: endpoint
+        if request_type == 0x82:
+            return 'SYNCH_FRAME'
+    return f"0x{request_id:02X}"
 
 
 # Conditions
