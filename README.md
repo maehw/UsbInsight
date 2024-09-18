@@ -38,34 +38,31 @@ The exported CSV file will have five columns labelled "name", "type", "start_tim
 Run `python3 usb_insight.py --help` to see the usage:
 
 ```
-usage: usb_insight.py [-h] [-p] [-t] [-ta] [-d] [-c] [-pbar] [-v]
-                      input_filename output_filename
+usage: usb_insight.py [-h] [-p] [-t] [-ta] [-d] [-c] [-xc] [-pbar] [-v] input_filename output_filename
 
 USB Protocol Decoder
 
 positional arguments:
   input_filename        CSV input file containing USB packet field data
-  output_filename       CSV output file containing valid USB packet data or
-                        USB transaction data
+  output_filename       CSV output file containing valid USB packet data or USB transaction data
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   -p, --packets         export valid decoded USB packets
   -t, --transactions    export valid decoded USB transactions
   -ta, --all-transactions
-                        export all valid decoded transactions, not only the
-                        acknowledged ones
-  -d, --decimal         represent payload data as decimal values instead of
-                        hexadecimal in exported CSV file (does not affect
-                        verbose output and fields of SETUP packet)
+                        export all valid decoded transactions, not only the acknowledged ones
+  -d, --decimal         represent payload data as decimal values instead of hexadecimal in exported CSV file (does not affect verbose
+                        output and fields of SETUP packet)
   -c, --ascii-characters
-                        represent payload data as ASCII printable characters
-                        in exported CSV file where feasible (does not affect
+                        represent payload data as ASCII printable characters in exported CSV file where feasible (does not affect
                         verbose output)
+  -xc, --extract-control
+                        extract binary data from control transfers on endpoints 0 (control pipes) as binary files (files are stored
+                        in current working directory)
   -pbar, --progress-bar
                         show a progress bar on stderr
-  -v, --verbose         output more or less details on stdout, will slow
-                        things down; can add multiple, e.g. -vvv
+  -v, --verbose         output more or less details on stdout, will slow things down; can add multiple, e.g. -vvv
 ```
 
 ### Progress bar

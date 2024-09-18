@@ -19,6 +19,7 @@
 import os
 import argparse
 import pandas as pd
+import copy
 
 
 # Generic finite state model class used for parsing USB packets and transactions
@@ -134,6 +135,27 @@ class UsbTransaction:
         self.ep = ep
         self.data = []
         self.success = None
+
+    def get_ep(self):
+        return self.ep
+
+    def get_address(self):
+        return self.addr
+
+    def get_type(self):
+        return self.type
+
+    def get_data_len(self):
+        return len(self.data)
+
+    def get_data_as_bytearray(self):
+        return bytearray(self.data)
+
+    def get_start_time(self):
+        return self.start_time_us
+
+    def is_successful(self):
+        return self.success
 
     def set_data(self, data):
         self.data = data
@@ -395,9 +417,41 @@ def is_nak_packet(packet):
     return packet.pid == 'NAK'
 
 
-def declist2hexstr(l):
-    assert isinstance(l, list)
-    return '[' + ', '.join(["0x{:02X}".format(e) for e in l]) + ']'
+def is_setup_transaction(transaction):
+    return transaction.get_type() == 'SETUP'
+
+
+def is_zerolength_inout_transaction(transaction):
+    return transaction.get_data_len() == 0 and transaction.get_type() in ['IN', 'OUT']
+
+
+def is_nonempty_in_transaction(transaction):
+    return transaction.get_data_len() != 0 and is_in_transaction(transaction)
+
+
+def is_in_transaction(transaction):
+    return transaction.get_type() == 'IN'
+
+
+def is_zerolength_out_transaction(transaction):
+    return transaction.get_data_len() == 0 and is_out_transaction(transaction)
+
+
+def is_nonempty_out_transaction(transaction):
+    return transaction.get_data_len() != 0 and is_out_transaction(transaction)
+
+
+def is_out_transaction(transaction):
+    return transaction.get_type() == 'OUT'
+
+
+def is_zerolength_in_transaction(transaction):
+    return transaction.get_data_len() == 0 and is_in_transaction(transaction)
+
+
+def declist2hexstr(list_object):
+    assert isinstance(list_object, list)
+    return '[' + ', '.join(["0x{:02X}".format(e) for e in list_object]) + ']'
 
 
 # Collect packets and transactions
@@ -472,6 +526,76 @@ tfsm.add_transition('CTRL_PAYLOAD', 'CTRL_CPLT', is_ack_packet)
 tfsm.add_transition('CTRL_CPLT', 'IDLE', lambda field: True)  # return to IDLE after virtual state
 
 
+# Initialize FSM for USB control transfers
+ctrlpipe_fsm = UsbFsm('IDLE')
+
+# Add transitions
+ctrlpipe_fsm.add_transition('IDLE', 'SETUP', is_setup_transaction)
+
+ctrlpipe_fsm.add_transition('SETUP', 'IDLE', is_zerolength_inout_transaction)
+
+ctrlpipe_fsm.add_transition('SETUP', 'IN_TRANSFER', is_nonempty_in_transaction)
+ctrlpipe_fsm.add_transition('IN_TRANSFER', 'IN_TRANSFER', is_in_transaction)
+ctrlpipe_fsm.add_transition('IN_TRANSFER', 'IN_TRANSFER_CPLT', is_zerolength_out_transaction)
+ctrlpipe_fsm.add_transition('IN_TRANSFER_CPLT', 'IDLE', lambda field: True)  # return to IDLE after virtual state
+
+ctrlpipe_fsm.add_transition('SETUP', 'OUT_TRANSFER', is_nonempty_out_transaction)
+ctrlpipe_fsm.add_transition('OUT_TRANSFER', 'OUT_TRANSFER', is_out_transaction)
+ctrlpipe_fsm.add_transition('OUT_TRANSFER', 'OUT_TRANSFER_CPLT', is_zerolength_in_transaction)
+ctrlpipe_fsm.add_transition('OUT_TRANSFER_CPLT', 'IDLE', lambda field: True)  # return to IDLE after virtual state
+
+
+# initialize an empty dictionary which keeps data for handling of control pipes (for individual USB addresses)
+ctrlpipes = {}
+
+
+def process_control_pipe_transaction(t):
+    # basically need to process control transfers here, i.e. check for its stages (setup, data, status);
+    # this needs to be distinguished for every device (with its own address);
+    # the binary data we're interested in is contained in the (optional(!)) data stage!
+    #
+    # after the setup stage,
+    # check if there's a non-zero sized data stage;
+    # - if this is the case, another zero-sized status stage is expected
+    # - otherwise, the data stage has been omitted and there's nothing to export anyway
+    if t.is_successful():
+        addr = t.get_address()
+        # check if we've already handled control pipes for this address before;
+        # if not, initialize the required data structures
+        if addr not in ctrlpipes:
+            ctrlpipes[addr] = {'fsm': None, 'start_time': None, 'data': bytearray()}
+            # create own copy of the control transfer FSM for this USB address
+            ctrlpipes[addr]['fsm'] = copy.deepcopy(ctrlpipe_fsm)
+
+        # Run control transfer FSM
+        state = ctrlpipes[addr]['fsm'].run(t)
+        # print(state)  # only for debugging; could be used in some verbosity level
+
+        if state == 'IDLE':
+            ctrlpipes[addr]['data'] = bytearray()
+        elif state == 'SETUP':
+            ctrlpipes[addr]['data'] = bytearray()
+            ctrlpipes[addr]['start_time'] = t.get_start_time()
+        elif '_TRANSFER' in state:
+            ctrlpipes[addr]['data'].extend(t.get_data_as_bytearray())
+
+        if '_CPLT' in state:
+            # store control transfer as file
+            binary_filename = f"{ctrlpipes[addr]['start_time']:09}_addr{addr}_ep0.bin"
+            with open(binary_filename, "wb") as f:
+                f.write(ctrlpipes[addr]['data'])
+
+            state = ctrlpipes[addr]['fsm'].run('')
+            # print(state)  # only for debugging; could be used in some verbosity level
+
+
+def process_rw_pipe_transaction(t):
+    if t.is_successful():
+        breakpoint()
+    else:
+        pass
+
+
 def decode_usb(command_line_args):
     verbosity = command_line_args.verbose
     input_filename = command_line_args.input_filename
@@ -479,6 +603,8 @@ def decode_usb(command_line_args):
     export_packets = command_line_args.packets
     export_transactions = command_line_args.transactions or command_line_args.all_transactions
     export_all_transactions = command_line_args.all_transactions
+    export_control_pipes = command_line_args.extract_control
+    # export_rw_pipes = command_line_args.extract_data  # TODO
     decimal_not_hex = command_line_args.decimal
     ascii_characters = command_line_args.ascii_characters
     progress_bar = command_line_args.progress_bar
@@ -488,6 +614,8 @@ def decode_usb(command_line_args):
         print(f"Exporting packets: {export_packets}")
         print(f"Exporting transactions: {export_transactions}")
         print(f"Exporting all transactions: {export_all_transactions}")
+        print(f"Exporting binary data from control transfers on endpoints 0 (control pipes): {export_control_pipes}")
+        # print(f"Exporting binary data from non-zero endpoints (read/write pipes): {export_rw_pipes}")  # TODO
         print(f"Display progress bar: {progress_bar}")
         if decimal_not_hex:
             print("Using decimal", end="")
@@ -638,6 +766,15 @@ def decode_usb(command_line_args):
                     csv_line = t.to_csv(export_all_transactions, decimal_not_hex, ascii_characters)
                     f.write(csv_line + os.linesep)
 
+    if export_control_pipes:  # or export_rw_pipes: TODO
+        for t in transactions:
+            ep = t.get_ep()
+            if ep == 0 and export_control_pipes:
+                process_control_pipe_transaction(t)
+            # TODO:
+            # elif ep != 0 and export_rw_pipes:
+            #    process_rw_pipe_transaction(t)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='USB Protocol Decoder')
@@ -663,6 +800,17 @@ if __name__ == '__main__':
                         action='store_true',
                         help='represent payload data as ASCII printable characters in exported CSV file where feasible '
                              '(does not affect verbose output)')
+    parser.add_argument('-xc',
+                        '--extract-control',
+                        action='store_true',
+                        help='extract binary data from control transfers on endpoints 0 (control pipes) '
+                             'as binary files (files are stored in current working directory)')
+    # TODO:
+    # parser.add_argument('-xd',
+    #                    '--extract-data',
+    #                    action='store_true',
+    #                    help='extract binary data from non-zero endpoints (read/write pipes) '
+    #                         'as binary files (files are stored in current working directory)')
     parser.add_argument('-pbar',
                         '--progress-bar',
                         action='store_true',
@@ -682,11 +830,16 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    # perform some checks on invalid command line argument combinations
     if (not args.packets) and (not args.transactions) and (not args.all_transactions):
         parser.print_help()
-        parser.error('Need to provide either -p or -t or -ta')
+        parser.error('Need to provide either -p/--packets or -t/--transactions or -ta/--all-transactions')
     elif args.packets and (args.transactions or args.all_transactions):
         parser.print_help()
         parser.error('Cannot mix -p/--packets with -t/--transactions or -ta/--all-transactions')
+    elif (args.extract_control or args.extract_data) and not (args.transactions or args.all_transactions):
+        parser.print_help()
+        parser.error('The use of -xc/--extract-control and -xd/--extract-data currently '
+                     'also requires -t/--transactions or -ta/--all-transactions')
     else:
         decode_usb(args)
