@@ -545,11 +545,13 @@ ctrlpipe_fsm.add_transition('OUT_TRANSFER', 'OUT_TRANSFER_CPLT', is_zerolength_i
 ctrlpipe_fsm.add_transition('OUT_TRANSFER_CPLT', 'IDLE', lambda field: True)  # return to IDLE after virtual state
 
 
-# initialize an empty dictionary which keeps data for handling of control pipes (for individual USB addresses)
+# initialize an empty dictionary which keeps data for handling control pipes (for individual USB addresses)
 ctrlpipes = {}
+# initialize an empty dictionary which keeps data for handling read/write pipes (for individual USB addresses)
+rwpipes = {}
 
 
-def process_control_pipe_transaction(t):
+def process_control_pipe_transaction(t, export):
     # basically need to process control transfers here, i.e. check for its stages (setup, data, status);
     # this needs to be distinguished for every device (with its own address);
     # the binary data we're interested in is contained in the (optional(!)) data stage!
@@ -558,12 +560,18 @@ def process_control_pipe_transaction(t):
     # check if there's a non-zero sized data stage;
     # - if this is the case, another zero-sized status stage is expected
     # - otherwise, the data stage has been omitted and there's nothing to export anyway
+    #
+    # return the USB device address if this call completes a successful control transfer
+    address_of_complete_ctl_xfer = None
+
     if t.is_successful():
         addr = t.get_address()
+        ep = t.get_ep()
+        assert ep == 0
         # check if we've already handled control pipes for this address before;
         # if not, initialize the required data structures
         if addr not in ctrlpipes:
-            ctrlpipes[addr] = {'fsm': None, 'start_time': None, 'data': bytearray()}
+            ctrlpipes[addr] = {'fsm': None, 'start_time': None, 'dir': None, 'data': bytearray()}
             # create own copy of the control transfer FSM for this USB address
             ctrlpipes[addr]['fsm'] = copy.deepcopy(ctrlpipe_fsm)
 
@@ -577,23 +585,42 @@ def process_control_pipe_transaction(t):
             ctrlpipes[addr]['data'] = bytearray()
             ctrlpipes[addr]['start_time'] = t.get_start_time()
         elif '_TRANSFER' in state:
+            if 'IN_' in state:
+                ctrlpipes[addr]['dir'] = 'IN'
+            elif 'OUT_' in state:
+                ctrlpipes[addr]['dir'] = 'OUT'
             ctrlpipes[addr]['data'].extend(t.get_data_as_bytearray())
 
         if '_CPLT' in state:
+            address_of_complete_ctl_xfer = addr
+
             # store control transfer as file
-            binary_filename = f"{ctrlpipes[addr]['start_time']:09}_addr{addr}_ep0.bin"
-            with open(binary_filename, "wb") as f:
-                f.write(ctrlpipes[addr]['data'])
+            if export:
+                directory = ctrlpipes[addr]['dir']
+                binary_filename = f"{ctrlpipes[addr]['start_time']:09}_addr{addr}_ep0_{directory}.bin"
+                with open(binary_filename, "wb") as f:
+                    f.write(ctrlpipes[addr]['data'])
 
             state = ctrlpipes[addr]['fsm'].run('')
             # print(state)  # only for debugging; could be used in some verbosity level
 
+    return address_of_complete_ctl_xfer
+
 
 def process_rw_pipe_transaction(t):
     if t.is_successful():
-        breakpoint()
-    else:
-        pass
+        addr = t.get_address()
+        ep = t.get_ep()
+        assert ep != 0
+        # check if we've already handled read/write pipes for this address before;
+        # if not, initialize the required data structures
+        if addr not in rwpipes:
+            rwpipes[addr] = {}
+        if ep not in rwpipes[addr]:
+            rwpipes[addr][ep] = {'start_time': t.get_start_time(), 'dir': None, 'data': bytearray()}
+
+        rwpipes[addr][ep]['dir'] = t.get_type()
+        rwpipes[addr][ep]['data'].extend(t.get_data_as_bytearray())
 
 
 def decode_usb(command_line_args):
@@ -604,7 +631,8 @@ def decode_usb(command_line_args):
     export_transactions = command_line_args.transactions or command_line_args.all_transactions
     export_all_transactions = command_line_args.all_transactions
     export_control_pipes = command_line_args.extract_control
-    # export_rw_pipes = command_line_args.extract_data  # TODO
+    export_rw_pipes = command_line_args.extract_data
+    export_rw_pipes_parts = command_line_args.extract_parts
     decimal_not_hex = command_line_args.decimal
     ascii_characters = command_line_args.ascii_characters
     progress_bar = command_line_args.progress_bar
@@ -615,7 +643,9 @@ def decode_usb(command_line_args):
         print(f"Exporting transactions: {export_transactions}")
         print(f"Exporting all transactions: {export_all_transactions}")
         print(f"Exporting binary data from control transfers on endpoints 0 (control pipes): {export_control_pipes}")
-        # print(f"Exporting binary data from non-zero endpoints (read/write pipes): {export_rw_pipes}")  # TODO
+        print(f"Exporting binary data from non-zero endpoints (read/write pipes): {export_rw_pipes}")
+        if export_rw_pipes_parts:
+            print(f"Exporting binary data from non-zero endpoints (read/write pipes) as parts.")
         print(f"Display progress bar: {progress_bar}")
         if decimal_not_hex:
             print("Using decimal", end="")
@@ -766,14 +796,43 @@ def decode_usb(command_line_args):
                     csv_line = t.to_csv(export_all_transactions, decimal_not_hex, ascii_characters)
                     f.write(csv_line + os.linesep)
 
-    if export_control_pipes:  # or export_rw_pipes: TODO
+    if export_control_pipes or export_rw_pipes:
         for t in transactions:
             ep = t.get_ep()
-            if ep == 0 and export_control_pipes:
-                process_control_pipe_transaction(t)
-            # TODO:
-            # elif ep != 0 and export_rw_pipes:
-            #    process_rw_pipe_transaction(t)
+            if ep == 0:
+                assert ep == 0
+                # processing of control pipes is always active (as also required for R/W pipes);
+                # only export (i.e. writing the output files) is optional
+                address_of_complete_ctl_xfer = process_control_pipe_transaction(t, export_control_pipes)
+                # as there may have been a control transfer, R/W pipe data can be split into parts
+                if export_rw_pipes_parts and address_of_complete_ctl_xfer is not None:
+                    # optionally flush read/write pipes here ("interrupted" by control transfers)
+                    if address_of_complete_ctl_xfer in rwpipes.keys():
+                        addr = address_of_complete_ctl_xfer
+                        # side note: we must copy the dict keys here as we change the dict itself during iteration;
+                        # (also: rwpipes is an empty dict if export_rw_pipes is False, no additional check required)
+                        for flush_ep in list(rwpipes[addr].keys()):
+                            # store read/write pipe data as file
+                            direction = rwpipes[addr][flush_ep]['dir']
+                            binary_filename = (f"{rwpipes[addr][flush_ep]['start_time']:09}_"
+                                               f"addr{addr}_ep{flush_ep}_{direction}.bin")
+                            with open(binary_filename, "wb") as f:
+                                f.write(rwpipes[addr][flush_ep]['data'])
+                            # reset data for this endpoint by deleting the dict entry
+                            del rwpipes[addr][flush_ep]
+            if ep != 0 and export_rw_pipes:
+                assert ep != 0
+                process_rw_pipe_transaction(t)
+        # flush read/write pipes here
+        # (rwpipes is an empty dict if export_rw_pipes is False, no additional check required)
+        for addr in rwpipes.keys():
+            for ep in rwpipes[addr].keys():
+                # store read/write pipe data as file
+                direction = rwpipes[addr][ep]['dir']
+                binary_filename = f"{rwpipes[addr][ep]['start_time']:09}_addr{addr}_ep{ep}_{direction}.bin"
+                with open(binary_filename, "wb") as f:
+                    f.write(rwpipes[addr][ep]['data'])
+        # TODO: think about if it also makes sense to "flush" pending data from incomplete control transfers
 
 
 if __name__ == '__main__':
@@ -805,12 +864,17 @@ if __name__ == '__main__':
                         action='store_true',
                         help='extract binary data from control transfers on endpoints 0 (control pipes) '
                              'as binary files (files are stored in current working directory)')
-    # TODO:
-    # parser.add_argument('-xd',
-    #                    '--extract-data',
-    #                    action='store_true',
-    #                    help='extract binary data from non-zero endpoints (read/write pipes) '
-    #                         'as binary files (files are stored in current working directory)')
+    parser.add_argument('-xd',
+                        '--extract-data',
+                        action='store_true',
+                        help='extract binary data from non-zero endpoints (read/write pipes) '
+                             'as binary files (files are stored in current working directory)')
+    parser.add_argument('-xp',
+                        '--extract-parts',
+                        action='store_true',
+                        help='split the extracted binary data from non-zero endpoints (read/write pipes) '
+                             'into multiple binary files for every endpoint, split by every control transfer on the '
+                             'same USB device address (endpoint 0)')
     parser.add_argument('-pbar',
                         '--progress-bar',
                         action='store_true',
@@ -841,5 +905,8 @@ if __name__ == '__main__':
         parser.print_help()
         parser.error('The use of -xc/--extract-control and -xd/--extract-data currently '
                      'also requires -t/--transactions or -ta/--all-transactions')
+    elif args.extract_parts and not args.extract_data:
+        parser.print_help()
+        parser.error('The use of -xp/--extract-parts also requires -xd/--extract-data')
     else:
         decode_usb(args)

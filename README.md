@@ -38,7 +38,7 @@ The exported CSV file will have five columns labelled "name", "type", "start_tim
 Run `python3 usb_insight.py --help` to see the usage:
 
 ```
-usage: usb_insight.py [-h] [-p] [-t] [-ta] [-d] [-c] [-xc] [-pbar] [-v] input_filename output_filename
+usage: usb_insight.py [-h] [-p] [-t] [-ta] [-d] [-c] [-xc] [-xd] [-xp] [-pbar] [-v] input_filename output_filename
 
 USB Protocol Decoder
 
@@ -60,6 +60,10 @@ options:
   -xc, --extract-control
                         extract binary data from control transfers on endpoints 0 (control pipes) as binary files (files are stored
                         in current working directory)
+  -xd, --extract-data   extract binary data from non-zero endpoints (read/write pipes) as binary files (files are stored in current
+                        working directory)
+  -xp, --extract-parts  split the extracted binary data from non-zero endpoints (read/write pipes) into multiple binary files for
+                        every endpoint, split by every control transfer on the same USB device address (endpoint 0)
   -pbar, --progress-bar
                         show a progress bar on stderr
   -v, --verbose         output more or less details on stdout, will slow things down; can add multiple, e.g. -vvv
