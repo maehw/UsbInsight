@@ -133,9 +133,8 @@ It's basically just two nested finite state machines:
 - There could be more additional filtering capabilities (e.g. only export traffic with specific device addresses or even endpoints). For now, this has to be done in your own post-processing.
 - Cannot handle `NYET` handshake packets yet.
 - Cannot handle special PIDs `PREamble`, `ERR`, `Split` and `Ping` yet.
-- This is all text-based processing and hence quite slow! But it works.
+- This is all text-based processing and hence quite slow! It's also single-threaded. But: it works!
 - This has only been tested with some of my own USB low-speed and full-speed captures so far. Feel free to provide your own captures, open an issue on GitHub and of course, also to fix the code and contribute your changes (by opening a pull request).
-- When analyzing the actual payload data, hexadecimal may be a better data representation than the current decimal one.
 - Separator for CSV output files is `;` as opposed to `,` in the input files from the Saleae Logic export. This allows us to export a list of payload bytes separated with commas in a single column.
 
 Feel free to contribute! Fork this repository and file a pull request!
